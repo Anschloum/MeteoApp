@@ -11,6 +11,8 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -29,9 +31,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gpsButton: Button
     private lateinit var btnRefresh: Button
     private lateinit var radarImageView: ImageView
+    private lateinit var forecastRecyclerView: RecyclerView
 
-    // Instance Retrofit pour l'API de Geocoding (Recherche de ville)
-    private val geocodingApi: GeocodingService by lazy {
+    // Services Retrofit
+    private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
             .baseUrl("https://geocoding-api.open-meteo.com/")
             .addConverterFactory(GsonConverterFactory.create())
@@ -39,8 +42,7 @@ class MainActivity : AppCompatActivity() {
             .create(GeocodingService::class.java)
     }
 
-    // Instance Retrofit pour l'API Open-Meteo (Prévisions)
-    private val openMeteoApi: OpenMeteoService by lazy {
+    private val openMeteoService: OpenMeteoService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.open-meteo.com/")
             .addConverterFactory(GsonConverterFactory.create())
@@ -48,7 +50,14 @@ class MainActivity : AppCompatActivity() {
             .create(OpenMeteoService::class.java)
     }
 
-    // Coordonnées courantes (Paris par défaut)
+    private val rainViewerService: RainViewerService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.rainviewer.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(RainViewerService::class.java)
+    }
+
     private var currentLat = 48.8566
     private var currentLon = 2.3522
 
@@ -56,10 +65,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialisation du client GPS
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // Liaison des composants graphiques du layout XML
         tvCity = findViewById(R.id.tvCity)
         tvTemp = findViewById(R.id.tvTemp)
         citySearchEditText = findViewById(R.id.citySearchEditText)
@@ -67,8 +74,11 @@ class MainActivity : AppCompatActivity() {
         gpsButton = findViewById(R.id.gpsButton)
         btnRefresh = findViewById(R.id.btnRefresh)
         radarImageView = findViewById(R.id.radarImageView)
+        forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
 
-        // Action : Recherche manuelle par ville
+        // Configuration de l'affichage horizontal du RecyclerView
+        forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+
         searchButton.setOnClickListener {
             val cityName = citySearchEditText.text.toString().trim()
             if (cityName.isNotEmpty()) {
@@ -78,17 +88,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Action : Géolocalisation GPS
         gpsButton.setOnClickListener {
             fetchLocationAndWeather()
         }
 
-        // Action : Bouton Actualiser
         btnRefresh.setOnClickListener {
             fetchWeather(currentLat, currentLon, tvCity.text.toString())
         }
 
-        // Chargement initial des données météo
         fetchWeather(currentLat, currentLon, "Paris")
     }
 
@@ -126,7 +133,7 @@ class MainActivity : AppCompatActivity() {
     private fun searchCityAndFetchWeather(cityName: String) {
         lifecycleScope.launch {
             try {
-                val response = geocodingApi.searchCity(cityName)
+                val response = geocodingService.searchCity(cityName)
                 val cityResult = response.results?.firstOrNull()
 
                 if (cityResult != null) {
@@ -145,25 +152,38 @@ class MainActivity : AppCompatActivity() {
     private fun fetchWeather(lat: Double, lon: Double, cityName: String) {
         lifecycleScope.launch {
             try {
-                val response = openMeteoApi.get14DaysForecast(lat = lat, lon = lon)
+                // 1. Récupération des prévisions 14 jours via OpenMeteoService
+                val forecastResponse = openMeteoService.get14DaysForecast(lat = lat, lon = lon)
                 
                 tvCity.text = cityName
-                val maxTemp = response.daily.temperature_2m_max.firstOrNull()
+                val maxTemp = forecastResponse.daily.temperature_2m_max.firstOrNull()
                 tvTemp.text = if (maxTemp != null) "$maxTemp °C" else "-- °C"
 
-                loadRadarImage()
+                // 2. Mise à jour de la liste RecyclerView avec les prévisions
+                forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
+
+                // 3. Chargement de l'image radar
+                loadRadarImage(lat, lon)
 
             } catch (e: Exception) {
                 tvTemp.text = "Erreur"
-                Toast.makeText(this@MainActivity, "Erreur de chargement météo", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Erreur de chargement des données", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun loadRadarImage() {
-        val radarUrl = "https://tilecache.rainviewer.com/v2/radar/nowcast_0/256/6/32/21/1/1_1.png"
-        radarImageView.load(radarUrl) {
-            crossfade(true)
+    private suspend fun loadRadarImage(lat: Double, lon: Double) {
+        try {
+            val mapsData = rainViewerService.getWeatherMaps()
+            val latestFrame = mapsData.radar.past.lastOrNull()
+            if (latestFrame != null) {
+                val tileUrl = "${mapsData.host}${latestFrame.path}/256/6/$lat/$lon/1/1_1.png"
+                radarImageView.load(tileUrl) {
+                    crossfade(true)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
