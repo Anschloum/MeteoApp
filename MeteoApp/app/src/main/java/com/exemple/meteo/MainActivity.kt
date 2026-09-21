@@ -3,7 +3,6 @@ package com.exemple.meteo
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.preference.PreferenceManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -76,8 +75,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Configuration Osmdroid
-        Configuration.getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
+        Configuration.getInstance().userAgentValue = packageName
 
         setContentView(R.layout.activity_main)
 
@@ -89,10 +87,10 @@ class MainActivity : AppCompatActivity() {
         searchButton = findViewById(R.id.searchButton)
         gpsButton = findViewById(R.id.gpsButton)
         btnRefresh = findViewById(R.id.btnRefresh)
-        
+
         mapView = findViewById(R.id.mapView)
         mapView.setTileSource(TileSourceFactory.MAPNIK)
-        mapView.setMultiTouchControls(true) // Active le pincement pour zoomer et le déplacement tactile
+        mapView.setMultiTouchControls(true)
 
         forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
         forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
@@ -182,12 +180,10 @@ class MainActivity : AppCompatActivity() {
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                // Centrer la carte sur la position/ville choisie
                 val mapController = mapView.controller
                 mapController.setZoom(7.0)
                 mapController.setCenter(GeoPoint(lat, lon))
 
-                // Démarrer l'animation radar
                 loadAndAnimateRadar()
 
             } catch (e: Exception) {
@@ -203,7 +199,6 @@ class MainActivity : AppCompatActivity() {
             val currentTimeSeconds = System.currentTimeMillis() / 1000
             val oneHourInSeconds = 3600
 
-            // Filtrer : 1h passée et 1h future
             val pastFrames = mapsData.radar.past.filter { it.time >= currentTimeSeconds - oneHourInSeconds }
             val futureFrames = mapsData.radar.nowcast.filter { it.time <= currentTimeSeconds + oneHourInSeconds }
             val framesSequence = pastFrames + futureFrames
@@ -222,31 +217,17 @@ class MainActivity : AppCompatActivity() {
             var index = 0
             while (isActive) {
                 val frame = frames[index]
-                
-                // Source de tuiles dynamique pour RainViewer
-                val tileSource = object : OnlineTileSourceBase(
-                    "RainViewer_${frame.time}",
-                    0, 18, 256, ".png",
-                    arrayOf(host)
-                ) {
-                    override fun getTileURLString(pMapTileIndex: Long): String {
-                        val zoom = MapTileIndex.getZoom(pMapTileIndex)
-                        val x = MapTileIndex.getX(pMapTileIndex)
-                        val y = MapTileIndex.getY(pMapTileIndex)
-                        return "$host${frame.path}/256/$zoom/$x/$y/2/1_1.png"
-                    }
-                }
 
+                val tileSource = RainViewerTileSource(host, frame.path)
                 val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
                 val radarOverlay = TilesOverlay(tileProvider, applicationContext)
 
-                // Conserver le fond de carte OpenStreetMap et remplacer la couche radar
                 mapView.overlays.clear()
                 mapView.overlays.add(radarOverlay)
                 mapView.invalidate()
 
                 index = (index + 1) % frames.size
-                delay(500) // Vitesse de lecture de l'animation (500 ms par image)
+                delay(500)
             }
         }
     }
@@ -278,5 +259,24 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val LOCATION_PERMISSION_REQ_CODE = 1001
+    }
+}
+
+class RainViewerTileSource(
+    private val baseUrl: String,
+    private val path: String
+) : OnlineTileSourceBase(
+    "RainViewer_$path",
+    0,
+    18,
+    256,
+    ".png",
+    arrayOf(baseUrl)
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String {
+        val zoom = MapTileIndex.getZoom(pMapTileIndex)
+        val x = MapTileIndex.getX(pMapTileIndex)
+        val y = MapTileIndex.getY(pMapTileIndex)
+        return "$baseUrl$path/256/$zoom/$x/$y/2/1_1.png"
     }
 }
