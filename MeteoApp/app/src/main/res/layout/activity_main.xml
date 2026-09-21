@@ -21,6 +21,31 @@
         android:text="-- °C"
         android:textSize="48sp"
         android:layout_marginTop="16dp" />
+    <!-- Section Radar -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Radar de Pluie"
+        android:textStyle="bold" />
+    
+    <ImageView
+        android:id="@+id/radarImageView"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:scaleType="centerCrop" />
+    
+    <!-- Section Prévisions -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Prévisions 14 jours"
+        android:textStyle="bold" />
+    
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/forecastRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal" />
 
     <Button
         android:id="@+id/btnRefresh"
