@@ -1,4 +1,4 @@
-package com.exemple.meteo // Adaptez selon votre package
+package com.exemple.meteo
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapBackgroundImageView: ImageView
     private lateinit var radarImageView: ImageView
     private lateinit var forecastRecyclerView: RecyclerView
+    private lateinit var hourlyRecyclerView: RecyclerView
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -79,9 +80,12 @@ class MainActivity : AppCompatActivity() {
         btnRefresh = findViewById(R.id.btnRefresh)
         mapBackgroundImageView = findViewById(R.id.mapBackgroundImageView)
         radarImageView = findViewById(R.id.radarImageView)
+        
         forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
-
         forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+
+        hourlyRecyclerView = findViewById(R.id.hourlyRecyclerView)
+        hourlyRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
 
         searchButton.setOnClickListener {
             val cityName = citySearchEditText.text.toString().trim()
@@ -156,12 +160,14 @@ class MainActivity : AppCompatActivity() {
     private fun fetchWeather(lat: Double, lon: Double, cityName: String) {
         lifecycleScope.launch {
             try {
+                // Correction du nom de la méthode ici
                 val forecastResponse = openMeteoService.get14DaysForecast(lat = lat, lon = lon)
-                
+
                 tvCity.text = cityName
                 val maxTemp = forecastResponse.daily.temperature_2m_max.firstOrNull()
                 tvTemp.text = if (maxTemp != null) "$maxTemp °C" else "-- °C"
 
+                hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
                 loadRadarImage(lat, lon)
@@ -184,14 +190,12 @@ class MainActivity : AppCompatActivity() {
                 val latRad = Math.toRadians(lat)
                 val y = floor((1.0 - ln(tan(latRad) + 1.0 / Math.cos(latRad)) / PI) / 2.0 * (1 shl zoom)).toInt()
 
-                // Fond de carte OpenStreetMap
                 val mapUrl = "https://tile.openstreetmap.org/$zoom/$x/$y.png"
                 mapBackgroundImageView.load(mapUrl) {
                     addHeader("User-Agent", "MeteoApp/1.0")
                     crossfade(true)
                 }
 
-                // Calque des pluies RainViewer
                 val radarTileUrl = "${mapsData.host}${latestFrame.path}/256/$zoom/$x/$y/2/1_1.png"
                 radarImageView.load(radarTileUrl) {
                     crossfade(true)
