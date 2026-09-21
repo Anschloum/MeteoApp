@@ -63,12 +63,29 @@
             android:textStyle="bold"
             android:layout_marginTop="16dp" />
 
-        <ImageView
-            android:id="@+id/radarImageView"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:scaleType="centerCrop"
-            android:layout_marginTop="8dp" />
+<FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="250dp"
+    android:layout_marginTop="16dp"
+    android:background="#E0E0E0">
+
+    <!-- Fond de carte OpenStreetMap -->
+    <ImageView
+        android:id="@+id/mapBackgroundImageView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="Fond de carte" />
+
+    <!-- Calque radar RainViewer -->
+    <ImageView
+        android:id="@+id/radarImageView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="Radar de pluie" />
+
+</FrameLayout>
 
         <!-- Section Prévisions -->
         <TextView
