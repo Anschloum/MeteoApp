@@ -3,9 +3,9 @@ package com.exemple.meteo
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.preference.PreferenceManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -13,16 +13,22 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import coil.load
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.MapTileProviderBasic
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.TilesOverlay
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import kotlin.math.PI
-import kotlin.math.floor
-import kotlin.math.ln
-import kotlin.math.tan
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,10 +40,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchButton: Button
     private lateinit var gpsButton: Button
     private lateinit var btnRefresh: Button
-    private lateinit var mapBackgroundImageView: ImageView
-    private lateinit var radarImageView: ImageView
+    private lateinit var mapView: MapView
     private lateinit var forecastRecyclerView: RecyclerView
     private lateinit var hourlyRecyclerView: RecyclerView
+
+    private var animationJob: Job? = null
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -68,6 +75,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Configuration Osmdroid
+        Configuration.getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
+
         setContentView(R.layout.activity_main)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -78,9 +89,11 @@ class MainActivity : AppCompatActivity() {
         searchButton = findViewById(R.id.searchButton)
         gpsButton = findViewById(R.id.gpsButton)
         btnRefresh = findViewById(R.id.btnRefresh)
-        mapBackgroundImageView = findViewById(R.id.mapBackgroundImageView)
-        radarImageView = findViewById(R.id.radarImageView)
         
+        mapView = findViewById(R.id.mapView)
+        mapView.setTileSource(TileSourceFactory.MAPNIK)
+        mapView.setMultiTouchControls(true) // Active le pincement pour zoomer et le déplacement tactile
+
         forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
         forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
 
@@ -160,7 +173,6 @@ class MainActivity : AppCompatActivity() {
     private fun fetchWeather(lat: Double, lon: Double, cityName: String) {
         lifecycleScope.launch {
             try {
-                // Correction du nom de la méthode ici
                 val forecastResponse = openMeteoService.get14DaysForecast(lat = lat, lon = lon)
 
                 tvCity.text = cityName
@@ -170,7 +182,13 @@ class MainActivity : AppCompatActivity() {
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                loadRadarImage(lat, lon)
+                // Centrer la carte sur la position/ville choisie
+                val mapController = mapView.controller
+                mapController.setZoom(7.0)
+                mapController.setCenter(GeoPoint(lat, lon))
+
+                // Démarrer l'animation radar
+                loadAndAnimateRadar()
 
             } catch (e: Exception) {
                 tvTemp.text = "Erreur"
@@ -179,31 +197,69 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun loadRadarImage(lat: Double, lon: Double) {
+    private suspend fun loadAndAnimateRadar() {
         try {
             val mapsData = rainViewerService.getWeatherMaps()
-            val latestFrame = mapsData.radar.past.lastOrNull()
+            val currentTimeSeconds = System.currentTimeMillis() / 1000
+            val oneHourInSeconds = 3600
 
-            if (latestFrame != null) {
-                val zoom = 6
-                val x = floor((lon + 180.0) / 360.0 * (1 shl zoom)).toInt()
-                val latRad = Math.toRadians(lat)
-                val y = floor((1.0 - ln(tan(latRad) + 1.0 / Math.cos(latRad)) / PI) / 2.0 * (1 shl zoom)).toInt()
+            // Filtrer : 1h passée et 1h future
+            val pastFrames = mapsData.radar.past.filter { it.time >= currentTimeSeconds - oneHourInSeconds }
+            val futureFrames = mapsData.radar.nowcast.filter { it.time <= currentTimeSeconds + oneHourInSeconds }
+            val framesSequence = pastFrames + futureFrames
 
-                val mapUrl = "https://tile.openstreetmap.org/$zoom/$x/$y.png"
-                mapBackgroundImageView.load(mapUrl) {
-                    addHeader("User-Agent", "MeteoApp/1.0")
-                    crossfade(true)
-                }
-
-                val radarTileUrl = "${mapsData.host}${latestFrame.path}/256/$zoom/$x/$y/2/1_1.png"
-                radarImageView.load(radarTileUrl) {
-                    crossfade(true)
-                }
+            if (framesSequence.isNotEmpty()) {
+                startRadarAnimation(mapsData.host, framesSequence)
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun startRadarAnimation(host: String, frames: List<RadarFrame>) {
+        animationJob?.cancel()
+        animationJob = lifecycleScope.launch {
+            var index = 0
+            while (isActive) {
+                val frame = frames[index]
+                
+                // Source de tuiles dynamique pour RainViewer
+                val tileSource = object : OnlineTileSourceBase(
+                    "RainViewer_${frame.time}",
+                    0, 18, 256, ".png",
+                    arrayOf(host)
+                ) {
+                    override fun getTileURLString(pMapTileIndex: Long): String {
+                        val zoom = MapTileIndex.getZoom(pMapTileIndex)
+                        val x = MapTileIndex.getX(pMapTileIndex)
+                        val y = MapTileIndex.getY(pMapTileIndex)
+                        return "$host${frame.path}/256/$zoom/$x/$y/2/1_1.png"
+                    }
+                }
+
+                val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
+                val radarOverlay = TilesOverlay(tileProvider, applicationContext)
+
+                // Conserver le fond de carte OpenStreetMap et remplacer la couche radar
+                mapView.overlays.clear()
+                mapView.overlays.add(radarOverlay)
+                mapView.invalidate()
+
+                index = (index + 1) % frames.size
+                delay(500) // Vitesse de lecture de l'animation (500 ms par image)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mapView.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mapView.onPause()
+        animationJob?.cancel()
     }
 
     override fun onRequestPermissionsResult(
