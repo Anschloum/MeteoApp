@@ -63,31 +63,45 @@
             android:textStyle="bold"
             android:layout_marginTop="16dp" />
 
-<FrameLayout
-    android:layout_width="match_parent"
-    android:layout_height="250dp"
-    android:layout_marginTop="16dp"
-    android:background="#E0E0E0">
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:layout_marginTop="8dp"
+            android:background="#E0E0E0">
 
-    <!-- Fond de carte OpenStreetMap -->
-    <ImageView
-        android:id="@+id/mapBackgroundImageView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="centerCrop"
-        android:contentDescription="Fond de carte" />
+            <ImageView
+                android:id="@+id/mapBackgroundImageView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:contentDescription="Fond de carte" />
 
-    <!-- Calque radar RainViewer -->
-    <ImageView
-        android:id="@+id/radarImageView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="centerCrop"
-        android:contentDescription="Radar de pluie" />
+            <ImageView
+                android:id="@+id/radarImageView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:contentDescription="Radar de pluie" />
 
-</FrameLayout>
+        </FrameLayout>
 
-        <!-- Section Prévisions -->
+        <!-- Section Prévisions Heure par Heure -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Prévisions heure par heure"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/hourlyRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:scrollbars="horizontal"
+            android:layout_marginTop="8dp" />
+
+        <!-- Section Prévisions 14 jours -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
