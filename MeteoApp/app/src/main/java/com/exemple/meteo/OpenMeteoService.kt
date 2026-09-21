@@ -8,6 +8,7 @@ interface OpenMeteoService {
     suspend fun get14DaysForecast(
         @Query("latitude") lat: Double = 48.8566,
         @Query("longitude") lon: Double = 2.3522,
+        @Query("hourly") hourly: String = "temperature_2m,precipitation,wind_speed_10m",
         @Query("daily") daily: String = "temperature_2m_max,temperature_2m_min,precipitation_sum",
         @Query("forecast_days") days: Int = 14,
         @Query("timezone") timezone: String = "auto"
@@ -15,7 +16,8 @@ interface OpenMeteoService {
 }
 
 data class ForecastResponse(
-    val daily: DailyData
+    val daily: DailyData,
+    val hourly: HourlyData
 )
 
 data class DailyData(
@@ -23,4 +25,11 @@ data class DailyData(
     val temperature_2m_max: List<Double>,
     val temperature_2m_min: List<Double>,
     val precipitation_sum: List<Double>
+)
+
+data class HourlyData(
+    val time: List<String>,
+    val temperature_2m: List<Double>,
+    val precipitation: List<Double>,
+    val wind_speed_10m: List<Double>
 )
