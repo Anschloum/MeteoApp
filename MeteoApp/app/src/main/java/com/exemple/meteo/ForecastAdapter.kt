@@ -1,10 +1,12 @@
+package com.exemple.meteo
+
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
-class ForecastAdapter(private val daily: Daily) : RecyclerView.Adapter<ForecastAdapter.ForecastViewHolder>() {
+class ForecastAdapter(private val daily: DailyData) : RecyclerView.Adapter<ForecastAdapter.ForecastViewHolder>() {
 
     class ForecastViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val tvDate: TextView = view.findViewById(R.id.tvForecastDate)
