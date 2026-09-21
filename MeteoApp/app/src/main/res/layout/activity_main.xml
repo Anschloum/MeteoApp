@@ -63,27 +63,11 @@
             android:textStyle="bold"
             android:layout_marginTop="16dp" />
 
-        <FrameLayout
+        <org.osmdroid.views.MapView
+            android:id="@+id/mapView"
             android:layout_width="match_parent"
-            android:layout_height="250dp"
-            android:layout_marginTop="8dp"
-            android:background="#E0E0E0">
-
-            <ImageView
-                android:id="@+id/mapBackgroundImageView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="centerCrop"
-                android:contentDescription="Fond de carte" />
-
-            <ImageView
-                android:id="@+id/radarImageView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="centerCrop"
-                android:contentDescription="Radar de pluie" />
-
-        </FrameLayout>
+            android:layout_height="300dp"
+            android:layout_marginTop="8dp" />
 
         <!-- Section Prévisions Heure par Heure -->
         <TextView
