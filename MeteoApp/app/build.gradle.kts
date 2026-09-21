@@ -28,6 +28,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("com.google.android.gms:play-services-location:21.2.0")
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 
     // Network & JSON Parsing
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
