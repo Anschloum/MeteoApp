@@ -1,4 +1,4 @@
-package com.exemple.meteo
+package com.exemple.meteo // Adaptez selon votre package
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -19,6 +19,10 @@ import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.launch
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import kotlin.math.PI
+import kotlin.math.floor
+import kotlin.math.ln
+import kotlin.math.tan
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,10 +34,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchButton: Button
     private lateinit var gpsButton: Button
     private lateinit var btnRefresh: Button
+    private lateinit var mapBackgroundImageView: ImageView
     private lateinit var radarImageView: ImageView
     private lateinit var forecastRecyclerView: RecyclerView
 
-    // Services Retrofit
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
             .baseUrl("https://geocoding-api.open-meteo.com/")
@@ -73,10 +77,10 @@ class MainActivity : AppCompatActivity() {
         searchButton = findViewById(R.id.searchButton)
         gpsButton = findViewById(R.id.gpsButton)
         btnRefresh = findViewById(R.id.btnRefresh)
+        mapBackgroundImageView = findViewById(R.id.mapBackgroundImageView)
         radarImageView = findViewById(R.id.radarImageView)
         forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
 
-        // Configuration de l'affichage horizontal du RecyclerView
         forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
 
         searchButton.setOnClickListener {
@@ -152,17 +156,14 @@ class MainActivity : AppCompatActivity() {
     private fun fetchWeather(lat: Double, lon: Double, cityName: String) {
         lifecycleScope.launch {
             try {
-                // 1. Récupération des prévisions 14 jours via OpenMeteoService
                 val forecastResponse = openMeteoService.get14DaysForecast(lat = lat, lon = lon)
                 
                 tvCity.text = cityName
                 val maxTemp = forecastResponse.daily.temperature_2m_max.firstOrNull()
                 tvTemp.text = if (maxTemp != null) "$maxTemp °C" else "-- °C"
 
-                // 2. Mise à jour de la liste RecyclerView avec les prévisions
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                // 3. Chargement de l'image radar
                 loadRadarImage(lat, lon)
 
             } catch (e: Exception) {
@@ -176,9 +177,23 @@ class MainActivity : AppCompatActivity() {
         try {
             val mapsData = rainViewerService.getWeatherMaps()
             val latestFrame = mapsData.radar.past.lastOrNull()
+
             if (latestFrame != null) {
-                val tileUrl = "${mapsData.host}${latestFrame.path}/256/6/$lat/$lon/1/1_1.png"
-                radarImageView.load(tileUrl) {
+                val zoom = 6
+                val x = floor((lon + 180.0) / 360.0 * (1 shl zoom)).toInt()
+                val latRad = Math.toRadians(lat)
+                val y = floor((1.0 - ln(tan(latRad) + 1.0 / Math.cos(latRad)) / PI) / 2.0 * (1 shl zoom)).toInt()
+
+                // Fond de carte OpenStreetMap
+                val mapUrl = "https://tile.openstreetmap.org/$zoom/$x/$y.png"
+                mapBackgroundImageView.load(mapUrl) {
+                    addHeader("User-Agent", "MeteoApp/1.0")
+                    crossfade(true)
+                }
+
+                // Calque des pluies RainViewer
+                val radarTileUrl = "${mapsData.host}${latestFrame.path}/256/$zoom/$x/$y/2/1_1.png"
+                radarImageView.load(radarTileUrl) {
                     crossfade(true)
                 }
             }
