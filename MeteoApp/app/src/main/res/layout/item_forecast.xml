@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="100dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:gravity="center"
+    android:background="@android:color/holo_blue_light"
+    android:layout_margin="4dp">
+
+    <TextView
+        android:id="@+id/tvForecastDate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="2026-02-10"
+        android:textColor="@android:color/white"
+        android:textStyle="bold"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/tvForecastMaxTemp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="15°C"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/tvForecastMinTemp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="8°C"
+        android:textColor="@android:color/white"
+        android:textSize="12sp" />
+</LinearLayout>
