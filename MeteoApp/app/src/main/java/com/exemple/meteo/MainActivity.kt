@@ -21,10 +21,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.MapTileProviderBasic
-import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
-import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.TilesOverlay
 import retrofit2.Retrofit
@@ -77,7 +76,6 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
-        // La configuration Osmdroid doit être faite avant setContentView
         Configuration.getInstance().userAgentValue = packageName
 
         super.onCreate(savedInstanceState)
@@ -96,9 +94,8 @@ class MainActivity : AppCompatActivity() {
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
 
-        // Désactive l'interception des gestes tactiles par le ScrollView parent
         mapView.setOnTouchListener { v, _ ->
-            v.parent.requestDisallowInterceptTouchEvent(true)
+            v.parent?.requestDisallowInterceptTouchEvent(true)
             false
         }
 
@@ -222,12 +219,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRadarOverlays(host: String, frames: List<RadarFrame>) {
-        radarOverlays.forEach { overlay ->
-            overlay.tileProvider.clearTileCache()
-        }
+        activeRadarOverlay?.let { mapView.overlays.remove(it) }
+        activeRadarOverlay = null
 
         radarOverlays = frames.map { frame ->
-            val tileSource = RainViewerTileSource(host, frame.path)
+            val tileSource = XYTileSource(
+                "RainViewer_${frame.time}",
+                0,
+                18,
+                256,
+                "/2/1_1.png",
+                arrayOf("$host${frame.path}/256/")
+            )
             val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
             TilesOverlay(tileProvider, applicationContext)
         }
@@ -280,24 +283,5 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val LOCATION_PERMISSION_REQ_CODE = 1001
-    }
-}
-
-class RainViewerTileSource(
-    private val baseUrl: String,
-    private val path: String
-) : OnlineTileSourceBase(
-    "RainViewer_$path",
-    0,
-    18,
-    256,
-    ".png",
-    arrayOf(baseUrl)
-) {
-    override fun getTileURLString(pMapTileIndex: Long): String {
-        val zoom = MapTileIndex.getZoom(pMapTileIndex)
-        val x = MapTileIndex.getX(pMapTileIndex)
-        val y = MapTileIndex.getY(pMapTileIndex)
-        return "$baseUrl$path/256/$zoom/$x/$y/2/1_1.png"
     }
 }
