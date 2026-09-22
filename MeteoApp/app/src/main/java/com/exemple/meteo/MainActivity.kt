@@ -45,7 +45,6 @@ class MainActivity : AppCompatActivity() {
 
     private var animationJob: Job? = null
     private var radarOverlays: List<TilesOverlay> = emptyList()
-    private var activeRadarOverlay: TilesOverlay? = null
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -93,7 +92,12 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
+        
+        // Bornes de zoom pour éviter les messages "zoom level not supported"
+        mapView.minZoomLevel = 4.0
+        mapView.maxZoomLevel = 12.0
 
+        // Permet le déplacement sur la carte dans un ScrollView
         mapView.setOnTouchListener { v, _ ->
             v.parent?.requestDisallowInterceptTouchEvent(true)
             false
@@ -187,7 +191,8 @@ class MainActivity : AppCompatActivity() {
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                mapView.controller.setZoom(7.0)
+                // Zoom à 8.8 (environ 100 km autour de la ville)
+                mapView.controller.setZoom(8.8)
                 mapView.controller.setCenter(GeoPoint(lat, lon))
 
                 loadAndAnimateRadar()
@@ -219,21 +224,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRadarOverlays(host: String, frames: List<RadarFrame>) {
-        activeRadarOverlay?.let { mapView.overlays.remove(it) }
-        activeRadarOverlay = null
+        // Nettoyage des calques précédents
+        radarOverlays.forEach { mapView.overlays.remove(it) }
 
         radarOverlays = frames.map { frame ->
             val tileSource = XYTileSource(
                 "RainViewer_${frame.time}",
-                0,
-                18,
+                3,
+                12,
                 256,
                 "/2/1_1.png",
                 arrayOf("$host${frame.path}/256/")
             )
             val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
-            TilesOverlay(tileProvider, applicationContext)
+            TilesOverlay(tileProvider, applicationContext).apply {
+                isEnabled = false // Masqué par défaut
+            }
         }
+
+        // Ajout de tous les calques à la carte (conservés en mémoire)
+        radarOverlays.forEach { mapView.overlays.add(it) }
     }
 
     private fun startRadarAnimation() {
@@ -243,12 +253,11 @@ class MainActivity : AppCompatActivity() {
         animationJob = lifecycleScope.launch {
             var index = 0
             while (isActive) {
-                val nextOverlay = radarOverlays[index]
-
-                activeRadarOverlay?.let { mapView.overlays.remove(it) }
-                mapView.overlays.add(nextOverlay)
-                activeRadarOverlay = nextOverlay
-                mapView.invalidate()
+                // Active uniquement l'image courante
+                radarOverlays.forEachIndexed { i, overlay ->
+                    overlay.isEnabled = (i == index)
+                }
+                mapView.postInvalidate()
 
                 index = (index + 1) % radarOverlays.size
                 delay(500)
