@@ -3,6 +3,7 @@ package com.exemple.meteo
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
@@ -15,17 +16,13 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.MapTileProviderBasic
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.TilesOverlay
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
@@ -43,8 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var forecastRecyclerView: RecyclerView
     private lateinit var hourlyRecyclerView: RecyclerView
 
-    private var animationJob: Job? = null
-    private var radarOverlays: List<TilesOverlay> = emptyList()
+    private lateinit var radarOverlayManager: RadarMapOverlayManager
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -62,22 +58,18 @@ class MainActivity : AppCompatActivity() {
             .create(OpenMeteoService::class.java)
     }
 
-    private val rainViewerService: RainViewerService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.rainviewer.com/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(RainViewerService::class.java)
-    }
     private val meteoFranceRadarService: MeteoFranceRadarService by lazy {
-    Retrofit.Builder()
-        .baseUrl("https://portail-api.meteofrance.fr/")
-        .build()
-        .create(MeteoFranceRadarService::class.java)
-}
+        Retrofit.Builder()
+            .baseUrl("https://portail-api.meteofrance.fr/")
+            .build()
+            .create(MeteoFranceRadarService::class.java)
+    }
 
     private var currentLat = 48.8566
     private var currentLon = 2.3522
+    
+    // Jeton d'API Météo-France (À récupérer sur portail-api.meteofrance.fr)
+    private val meteoFranceToken = "eyJ4NXQiOiJZV0kxTTJZNE1qWTNOemsyTkRZeU5XTTRPV014TXpjek1UVmhNbU14T1RSa09ETXlOVEE0Tnc9PSIsImtpZCI6ImdhdGV3YXlfY2VydGlmaWNhdGVfYWxpYXMiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJBbnNjaGxvdW1AY2FyYm9uLnN1cGVyIiwiYXBwbGljYXRpb24iOnsib3duZXIiOiJBbnNjaGxvdW0iLCJ0aWVyUXVvdGFUeXBlIjpudWxsLCJ0aWVyIjoiVW5saW1pdGVkIiwibmFtZSI6IkRlZmF1bHRBcHBsaWNhdGlvbiIsImlkIjo0ODI0NSwidXVpZCI6ImZlNWI2OTI2LTBiODEtNGU3NC1iNTg3LTdmYzA1NGY5Y2NhNCJ9LCJpc3MiOiJodHRwczpcL1wvcG9ydGFpbC1hcGkubWV0ZW9mcmFuY2UuZnI6NDQzXC9vYXV0aDJcL3Rva2VuIiwidGllckluZm8iOnsiODUwcmVxUGVyNU1pbiI6eyJ0aWVyUXVvdGFUeXBlIjoicmVxdWVzdENvdW50IiwiZ3JhcGhRTE1heENvbXBsZXhpdHkiOjAsImdyYXBoUUxNYXhEZXB0aCI6MCwic3RvcE9uUXVvdGFSZWFjaCI6dHJ1ZSwic3Bpa2VBcnJlc3RMaW1pdCI6MCwic3Bpa2VBcnJlc3RVbml0Ijoic2VjIn19LCJrZXl0eXBlIjoiUFJPRFVDVElPTiIsInN1YnNjcmliZWRBUElzIjpbeyJzdWJzY3JpYmVyVGVuYW50RG9tYWluIjoiY2FyYm9uLnN1cGVyIiwibmFtZSI6IkRvbm5lZXNQdWJsaXF1ZXNSYWRhciIsImNvbnRleHQiOiJcL3B1YmxpY1wvRFBSYWRhclwvdjEiLCJwdWJsaXNoZXIiOiJNRVRFTy5GUlwvbWFydGlubCIsInZlcnNpb24iOiJ2MSIsInN1YnNjcmlwdGlvblRpZXIiOiI4NTByZXFQZXI1TWluIn1dLCJleHAiOjE4ODQ3NTI5NDAsInRva2VuX3R5cGUiOiJhcGlLZXkiLCJpYXQiOjE3OTAwODAxNDAsImp0aSI6IjViMzZmODIzLTgzMzMtNGQ2Mi04MzIxLTM1Zjk3YjkxNWE2NSJ9.vYtgfLq0Ktr7hkFGLFAMfaEUJA_tgeIosEArL8SRil7S2aBZqs9aA_MnTRtVHRtS0JyI1V-V5YgyPNYqBDHrOSCx_EXW9L9ONCWkQflqY0_GEyIvKopOG-jUXSiKvR_iAmiDKYA5PG8bTk0-GWynChC89hjCMcqPwX2Tm17llfyVju738vql2BeYpo8ratKbggK0m9QqZce14SnpKMCMQ3TAAwEx4pp1fewY99swHyZS10-aCj3pJegHmuTbcQ3VDL_XErr-b81lINc-_LOSuZgFx9xsLVN6mbbxGVDCx7UXRSsc5dg-dY3BHaYsKucdXV4eAiSDHERRunTpG2hRqg=="
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,12 +90,13 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
-        
-        // Bornes de zoom pour éviter les messages "zoom level not supported"
-        mapView.minZoomLevel = 4.0
-        mapView.maxZoomLevel = 12.0
 
-        // Permet le déplacement sur la carte dans un ScrollView
+        mapView.minZoomLevel = 4.0
+        mapView.maxZoomLevel = 18.0
+
+        // Gestionnaire de calque radar
+        radarOverlayManager = RadarMapOverlayManager(mapView)
+
         mapView.setOnTouchListener { v, _ ->
             v.parent?.requestDisallowInterceptTouchEvent(true)
             false
@@ -197,11 +190,10 @@ class MainActivity : AppCompatActivity() {
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                // Zoom à 8.8 (environ 100 km autour de la ville)
                 mapView.controller.setZoom(8.8)
                 mapView.controller.setCenter(GeoPoint(lat, lon))
 
-                loadAndAnimateRadar()
+                loadMeteoFranceRadar()
 
             } catch (e: Exception) {
                 tvTemp.text = "Erreur"
@@ -210,63 +202,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun loadAndAnimateRadar() {
-        try {
-            val mapsData = rainViewerService.getWeatherMaps()
-            val currentTimeSeconds = System.currentTimeMillis() / 1000
-            val oneHourInSeconds = 3600
+    private fun loadMeteoFranceRadar() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val response = meteoFranceRadarService.fetchLatestMosaic("Bearer $meteoFranceToken")
+                if (response.isSuccessful && response.body() != null) {
+                    val rawBytes = response.body()!!.bytes()
 
-            val pastFrames = mapsData.radar.past.filter { it.time >= currentTimeSeconds - oneHourInSeconds }
-            val futureFrames = mapsData.radar.nowcast.filter { it.time <= currentTimeSeconds + oneHourInSeconds }
-            val framesSequence = pastFrames + futureFrames
+                    // Extraction des données binaires (Largeur x Hauteur)
+                    val width = 512
+                    val height = 512
+                    val grid = Array(height) { FloatArray(width) }
 
-            if (framesSequence.isNotEmpty()) {
-                setupRadarOverlays(mapsData.host, framesSequence)
-                startRadarAnimation()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
+                    // TODO: Décoder le buffer binaire (rawBytes) dans la grille selon le format Météo-France
 
-    private fun setupRadarOverlays(host: String, frames: List<RadarFrame>) {
-        // Nettoyage des calques précédents
-        radarOverlays.forEach { mapView.overlays.remove(it) }
+                    val bitmap = RadarPostProcessor.convertGridToBitmap(grid, width, height)
 
-        radarOverlays = frames.map { frame ->
-            val tileSource = XYTileSource(
-                "RainViewer_${frame.time}",
-                3,
-                12,
-                256,
-                "/2/1_1.png",
-                arrayOf("$host${frame.path}/256/")
-            )
-            val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
-            TilesOverlay(tileProvider, applicationContext).apply {
-                isEnabled = false // Masqué par défaut
-            }
-        }
-
-        // Ajout de tous les calques à la carte (conservés en mémoire)
-        radarOverlays.forEach { mapView.overlays.add(it) }
-    }
-
-    private fun startRadarAnimation() {
-        animationJob?.cancel()
-        if (radarOverlays.isEmpty()) return
-
-        animationJob = lifecycleScope.launch {
-            var index = 0
-            while (isActive) {
-                // Active uniquement l'image courante
-                radarOverlays.forEachIndexed { i, overlay ->
-                    overlay.isEnabled = (i == index)
+                    withContext(Dispatchers.Main) {
+                        radarOverlayManager.updateRadarOverlay(bitmap)
+                    }
                 }
-                mapView.postInvalidate()
-
-                index = (index + 1) % radarOverlays.size
-                delay(500)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
@@ -279,7 +236,6 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         mapView.onPause()
-        animationJob?.cancel()
     }
 
     override fun onRequestPermissionsResult(
