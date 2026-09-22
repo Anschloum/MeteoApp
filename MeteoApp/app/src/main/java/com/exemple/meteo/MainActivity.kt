@@ -1,10 +1,9 @@
-package com.exemple.meteo // À remplacer par le nom exact de votre package
+package com.exemple.meteo
 
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Base64
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -16,151 +15,15 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.ResponseBody
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Field
-import retrofit2.http.FormUrlEncoded
-import retrofit2.http.GET
-import retrofit2.http.Header
-import retrofit2.http.POST
-import retrofit2.http.Query
-
-// --- MODÈLES ET SERVICES OPEN-METEO ---
-
-data class CityResult(
-    val name: String,
-    val latitude: Double,
-    val longitude: Double
-)
-
-data class GeocodingResponse(
-    val results: List<CityResult>?
-)
-
-interface GeocodingService {
-    @GET("v1/search")
-    suspend fun searchCity(
-        @Query("name") name: String,
-        @Query("count") count: Int = 1
-    ): GeocodingResponse
-}
-
-data class DailyData(
-    val temperature_2m_max: List<Double>
-)
-
-data class HourlyData(
-    val time: List<String>,
-    val temperature_2m: List<Double>
-)
-
-data class ForecastResponse(
-    val daily: DailyData,
-    val hourly: HourlyData
-)
-
-interface OpenMeteoService {
-    @GET("v1/forecast")
-    suspend fun get14DaysForecast(
-        @Query("latitude") lat: Double,
-        @Query("longitude") lon: Double,
-        @Query("daily") daily: String = "temperature_2m_max",
-        @Query("hourly") hourly: String = "temperature_2m",
-        @Query("forecast_days") days: Int = 14
-    ): ForecastResponse
-}
-
-// --- MODÈLES ET SERVICES MÉTÉO-FRANCE AUTH ---
-
-data class TokenResponse(
-    @SerializedName("access_token") val accessToken: String,
-    @SerializedName("token_type") val tokenType: String,
-    @SerializedName("expires_in") val expiresIn: Long
-)
-
-interface MeteoFranceAuthService {
-    @FormUrlEncoded
-    @POST("token")
-    suspend fun fetchToken(
-        @Header("Authorization") basicAuthHeader: String,
-        @Field("grant_type") grantType: String = "client_credentials"
-    ): Response<TokenResponse>
-
-    companion object {
-        fun create(): MeteoFranceAuthService {
-            return Retrofit.Builder()
-                .baseUrl("https://portail-api.meteofrance.fr/")
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-                .create(MeteoFranceAuthService::class.java)
-        }
-    }
-}
-
-class MeteoFranceTokenManager(
-    private val authService: MeteoFranceAuthService,
-    private val consumerKey: String,
-    private val consumerSecret: String
-) {
-    private var cachedToken: String? = null
-    private var tokenExpirationTimeMs: Long = 0
-
-    suspend fun getValidToken(): String? {
-        val currentTime = System.currentTimeMillis()
-
-        if (cachedToken != null && currentTime < (tokenExpirationTimeMs - 60_000)) {
-            return cachedToken
-        }
-
-        val credentials = "$consumerKey:$consumerSecret"
-        val basicAuthHeader = "Basic " + Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
-
-        return try {
-            val response = authService.fetchToken(basicAuthHeader)
-            if (response.isSuccessful && response.body() != null) {
-                val tokenBody = response.body()!!
-                cachedToken = tokenBody.accessToken
-                tokenExpirationTimeMs = currentTime + (tokenBody.expiresIn * 1000)
-                cachedToken
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-}
-
-// --- SERVICE RADAR MÉTÉO-FRANCE ---
-
-interface MeteoFranceRadarService {
-    @GET("v1/donneespubliques/radar/mosaique")
-    suspend fun fetchLatestMosaic(
-        @Header("Authorization") bearerToken: String
-    ): Response<ResponseBody>
-
-    companion object {
-        fun create(): MeteoFranceRadarService {
-            return Retrofit.Builder()
-                .baseUrl("https://portail-api.meteofrance.fr/")
-                .build()
-                .create(MeteoFranceRadarService::class.java)
-        }
-    }
-}
-
-// --- MAIN ACTIVITY ---
 
 class MainActivity : AppCompatActivity() {
 
@@ -354,8 +217,6 @@ class MainActivity : AppCompatActivity() {
 
                 val response = meteoFranceRadarService.fetchLatestMosaic("Bearer $token")
                 if (response.isSuccessful && response.body() != null) {
-                    val rawBytes = response.body()!!.bytes()
-
                     val width = 512
                     val height = 512
                     val grid = Array(height) { FloatArray(width) }
