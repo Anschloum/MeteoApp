@@ -69,6 +69,12 @@ class MainActivity : AppCompatActivity() {
             .build()
             .create(RainViewerService::class.java)
     }
+    private val meteoFranceRadarService: MeteoFranceRadarService by lazy {
+    Retrofit.Builder()
+        .baseUrl("https://portail-api.meteofrance.fr/")
+        .build()
+        .create(MeteoFranceRadarService::class.java)
+}
 
     private var currentLat = 48.8566
     private var currentLon = 2.3522
