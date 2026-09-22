@@ -1,6 +1,7 @@
 package com.exemple.meteo
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Button
@@ -44,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var hourlyRecyclerView: RecyclerView
 
     private var animationJob: Job? = null
+    private var radarOverlays: List<TilesOverlay> = emptyList()
+    private var activeRadarOverlay: TilesOverlay? = null
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -72,11 +75,12 @@ class MainActivity : AppCompatActivity() {
     private var currentLat = 48.8566
     private var currentLon = 2.3522
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
+        // La configuration Osmdroid doit être faite avant setContentView
         Configuration.getInstance().userAgentValue = packageName
 
+        super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -91,6 +95,12 @@ class MainActivity : AppCompatActivity() {
         mapView = findViewById(R.id.mapView)
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
+
+        // Désactive l'interception des gestes tactiles par le ScrollView parent
+        mapView.setOnTouchListener { v, _ ->
+            v.parent.requestDisallowInterceptTouchEvent(true)
+            false
+        }
 
         forecastRecyclerView = findViewById(R.id.forecastRecyclerView)
         forecastRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
@@ -180,9 +190,8 @@ class MainActivity : AppCompatActivity() {
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
 
-                val mapController = mapView.controller
-                mapController.setZoom(7.0)
-                mapController.setCenter(GeoPoint(lat, lon))
+                mapView.controller.setZoom(7.0)
+                mapView.controller.setCenter(GeoPoint(lat, lon))
 
                 loadAndAnimateRadar()
 
@@ -204,29 +213,41 @@ class MainActivity : AppCompatActivity() {
             val framesSequence = pastFrames + futureFrames
 
             if (framesSequence.isNotEmpty()) {
-                startRadarAnimation(mapsData.host, framesSequence)
+                setupRadarOverlays(mapsData.host, framesSequence)
+                startRadarAnimation()
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun startRadarAnimation(host: String, frames: List<RadarFrame>) {
+    private fun setupRadarOverlays(host: String, frames: List<RadarFrame>) {
+        radarOverlays.forEach { overlay ->
+            overlay.tileProvider.clearTileCache()
+        }
+
+        radarOverlays = frames.map { frame ->
+            val tileSource = RainViewerTileSource(host, frame.path)
+            val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
+            TilesOverlay(tileProvider, applicationContext)
+        }
+    }
+
+    private fun startRadarAnimation() {
         animationJob?.cancel()
+        if (radarOverlays.isEmpty()) return
+
         animationJob = lifecycleScope.launch {
             var index = 0
             while (isActive) {
-                val frame = frames[index]
+                val nextOverlay = radarOverlays[index]
 
-                val tileSource = RainViewerTileSource(host, frame.path)
-                val tileProvider = MapTileProviderBasic(applicationContext, tileSource)
-                val radarOverlay = TilesOverlay(tileProvider, applicationContext)
-
-                mapView.overlays.clear()
-                mapView.overlays.add(radarOverlay)
+                activeRadarOverlay?.let { mapView.overlays.remove(it) }
+                mapView.overlays.add(nextOverlay)
+                activeRadarOverlay = nextOverlay
                 mapView.invalidate()
 
-                index = (index + 1) % frames.size
+                index = (index + 1) % radarOverlays.size
                 delay(500)
             }
         }
