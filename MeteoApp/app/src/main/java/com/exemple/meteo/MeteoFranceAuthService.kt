@@ -1,5 +1,6 @@
 package com.exemple.meteo
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -9,9 +10,9 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 
 data class TokenResponse(
-    val access_token: String,
-    val token_type: String,
-    val expires_in: Long
+    @SerializedName("access_token") val accessToken: String,
+    @SerializedName("token_type") val tokenType: String,
+    @SerializedName("expires_in") val expiresIn: Long
 )
 
 interface MeteoFranceAuthService {
