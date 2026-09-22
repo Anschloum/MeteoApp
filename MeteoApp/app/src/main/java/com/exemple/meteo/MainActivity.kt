@@ -1,4 +1,4 @@
-package com.exemple.meteo // Remplacez par le nom exact de votre package
+package com.exemple.meteo // À remplacer par le nom exact de votre package
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -33,8 +33,54 @@ import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Query
 
-// --- AUTHENTIFICATION MÉTÉO-FRANCE ---
+// --- MODÈLES ET SERVICES OPEN-METEO ---
+
+data class CityResult(
+    val name: String,
+    val latitude: Double,
+    val longitude: Double
+)
+
+data class GeocodingResponse(
+    val results: List<CityResult>?
+)
+
+interface GeocodingService {
+    @GET("v1/search")
+    suspend fun searchCity(
+        @Query("name") name: String,
+        @Query("count") count: Int = 1
+    ): GeocodingResponse
+}
+
+data class DailyData(
+    val temperature_2m_max: List<Double>
+)
+
+data class HourlyData(
+    val time: List<String>,
+    val temperature_2m: List<Double>
+)
+
+data class ForecastResponse(
+    val daily: DailyData,
+    val hourly: HourlyData
+)
+
+interface OpenMeteoService {
+    @GET("v1/forecast")
+    suspend fun get14DaysForecast(
+        @Query("latitude") lat: Double,
+        @Query("longitude") lon: Double,
+        @Query("daily") daily: String = "temperature_2m_max",
+        @Query("hourly") hourly: String = "temperature_2m",
+        @Query("forecast_days") days: Int = 14
+    ): ForecastResponse
+}
+
+// --- MODÈLES ET SERVICES MÉTÉO-FRANCE AUTH ---
 
 data class TokenResponse(
     @SerializedName("access_token") val accessToken: String,
@@ -96,7 +142,7 @@ class MeteoFranceTokenManager(
     }
 }
 
-// --- API RADAR MÉTÉO-FRANCE ---
+// --- SERVICE RADAR MÉTÉO-FRANCE ---
 
 interface MeteoFranceRadarService {
     @GET("v1/donneespubliques/radar/mosaique")
@@ -132,7 +178,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var radarOverlayManager: RadarMapOverlayManager
 
-    // Identifiants Météo-France
     private val consumerKey = "SxmEZh3U2pIniTws1NQu7u0S4o4a"
     private val consumerSecret = "kXbE4mb8QI7_ETz_dAXeB2qTS4Ma"
 
