@@ -4,8 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.MotionEvent
 import android.widget.Button
 import android.widget.EditText
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -15,15 +17,20 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,23 +45,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapView: MapView
     private lateinit var forecastRecyclerView: RecyclerView
     private lateinit var hourlyRecyclerView: RecyclerView
+    private lateinit var radarPlayButton: Button
+    private lateinit var radarSeekBar: SeekBar
+    private lateinit var radarTimeTextView: TextView
 
     private lateinit var radarOverlayManager: RadarMapOverlayManager
-
-    private val consumerKey = "SxmEZh3U2pIniTws1NQu7u0S4o4a"
-    private val consumerSecret = "kXbE4mb8QI7_ETz_dAXeB2qTS4Ma"
-
-    private val tokenManager: MeteoFranceTokenManager by lazy {
-        MeteoFranceTokenManager(
-            authService = MeteoFranceAuthService.create(),
-            consumerKey = consumerKey,
-            consumerSecret = consumerSecret
-        )
-    }
-
-    private val meteoFranceRadarService: MeteoFranceRadarService by lazy {
-        MeteoFranceRadarService.create()
-    }
 
     private val geocodingService: GeocodingService by lazy {
         Retrofit.Builder()
@@ -72,8 +67,24 @@ class MainActivity : AppCompatActivity() {
             .create(OpenMeteoService::class.java)
     }
 
+    private val rainViewerService: RainViewerService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.rainviewer.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(RainViewerService::class.java)
+    }
+
     private var currentLat = 48.8566
     private var currentLon = 2.3522
+    private var radarHost = ""
+    private var radarFrames: List<RadarTimelineFrame> = emptyList()
+    private var latestRadarObservationTime = 0L
+    private var currentRadarFrameIndex = 0
+    private var radarAnimationJob: Job? = null
+    private var radarLoadJob: Job? = null
+    private var radarAnimationHasStarted = false
+    private val radarTimeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,17 +101,37 @@ class MainActivity : AppCompatActivity() {
         searchButton = findViewById(R.id.searchButton)
         gpsButton = findViewById(R.id.gpsButton)
         btnRefresh = findViewById(R.id.btnRefresh)
+        radarPlayButton = findViewById(R.id.radarPlayButton)
+        radarSeekBar = findViewById(R.id.radarSeekBar)
+        radarTimeTextView = findViewById(R.id.radarTimeTextView)
 
         mapView = findViewById(R.id.mapView)
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
-        mapView.minZoomLevel = 4.0
-        mapView.maxZoomLevel = 18.0
+        mapView.minZoomLevel = 3.0
+        mapView.maxZoomLevel = 20.0
 
         radarOverlayManager = RadarMapOverlayManager(mapView)
+        configureRadarControls()
 
-        mapView.setOnTouchListener { v, _ ->
-            v.parent?.requestDisallowInterceptTouchEvent(true)
+        findViewById<Button>(R.id.radarZoomInButton).setOnClickListener {
+            mapView.controller.zoomIn()
+        }
+        findViewById<Button>(R.id.radarZoomOutButton).setOnClickListener {
+            mapView.controller.zoomOut()
+        }
+
+        mapView.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_POINTER_DOWN,
+                MotionEvent.ACTION_MOVE ->
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL ->
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
             false
         }
 
@@ -181,6 +212,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fetchWeather(lat: Double, lon: Double, cityName: String) {
+        mapView.controller.setZoom(8.8)
+        mapView.controller.setCenter(GeoPoint(lat, lon))
+        loadRainViewerRadar()
+
         lifecycleScope.launch {
             try {
                 val forecastResponse = openMeteoService.get14DaysForecast(lat = lat, lon = lon)
@@ -191,12 +226,6 @@ class MainActivity : AppCompatActivity() {
 
                 hourlyRecyclerView.adapter = HourlyForecastAdapter(forecastResponse.hourly)
                 forecastRecyclerView.adapter = ForecastAdapter(forecastResponse.daily)
-
-                mapView.controller.setZoom(8.8)
-                mapView.controller.setCenter(GeoPoint(lat, lon))
-
-                loadMeteoFranceRadar()
-
             } catch (e: Exception) {
                 tvTemp.text = "Erreur"
                 Toast.makeText(this@MainActivity, "Erreur de chargement des données", Toast.LENGTH_SHORT).show()
@@ -204,32 +233,140 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadMeteoFranceRadar() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val token = tokenManager.getValidToken()
-                if (token == null) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Échec d'authentification Météo-France", Toast.LENGTH_SHORT).show()
-                    }
-                    return@launch
-                }
-
-                val response = meteoFranceRadarService.fetchLatestMosaic("Bearer $token")
-                if (response.isSuccessful && response.body() != null) {
-                    val width = 512
-                    val height = 512
-                    val grid = Array(height) { FloatArray(width) }
-
-                    val bitmap = RadarPostProcessor.convertGridToBitmap(grid, width, height)
-
-                    withContext(Dispatchers.Main) {
-                        radarOverlayManager.updateRadarOverlay(bitmap)
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+    private fun configureRadarControls() {
+        radarPlayButton.setOnClickListener {
+            if (radarAnimationJob == null) {
+                startRadarAnimation()
+            } else {
+                stopRadarAnimation()
             }
+        }
+
+        radarSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    stopRadarAnimation()
+                    radarAnimationHasStarted = true
+                    showRadarFrame(progress)
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+    }
+
+    private fun loadRainViewerRadar() {
+        radarLoadJob?.cancel()
+        stopRadarAnimation()
+        radarPlayButton.isEnabled = false
+        radarSeekBar.isEnabled = false
+        radarTimeTextView.text = "Chargement du radar…"
+
+        radarLoadJob = lifecycleScope.launch {
+            try {
+                val response = rainViewerService.getWeatherMaps()
+                val pastFrames = response.radar.past
+                    .filter { it.time > 0 && it.path.isNotBlank() }
+                    .sortedBy { it.time }
+
+                val latestObservation = pastFrames.lastOrNull()
+                    ?: throw IllegalStateException("Aucune image radar disponible")
+                latestRadarObservationTime = latestObservation.time
+
+                val firstWantedTime = latestObservation.time - RADAR_HISTORY_SECONDS
+                val observations = pastFrames
+                    .filter { it.time >= firstWantedTime }
+                    .map { RadarTimelineFrame(it, isForecast = false) }
+                val forecasts = response.radar.nowcast
+                    .filter {
+                        it.time > latestObservation.time &&
+                            it.path.isNotBlank()
+                    }
+                    .map { RadarTimelineFrame(it, isForecast = true) }
+
+                radarFrames = (observations + forecasts)
+                    .distinctBy { it.frame.time }
+                    .sortedBy { it.frame.time }
+
+                if (response.host.isBlank() || radarFrames.isEmpty()) {
+                    throw IllegalStateException("Réponse radar incomplète")
+                }
+
+                radarHost = response.host
+                radarOverlayManager.clearOverlays()
+                radarAnimationHasStarted = false
+                radarSeekBar.max = radarFrames.lastIndex
+                radarSeekBar.isEnabled = radarFrames.size > 1
+                radarPlayButton.isEnabled = radarFrames.size > 1
+
+                currentRadarFrameIndex = radarFrames.indexOfLast { !it.isForecast }
+                    .coerceAtLeast(0)
+                radarSeekBar.progress = currentRadarFrameIndex
+                showRadarFrame(currentRadarFrameIndex)
+            } catch (e: Exception) {
+                radarFrames = emptyList()
+                radarOverlayManager.clearOverlays()
+                radarTimeTextView.text = "Radar indisponible — touchez Actualiser"
+                Toast.makeText(
+                    this@MainActivity,
+                    "Impossible de charger le radar de pluie",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    private fun showRadarFrame(index: Int) {
+        val timelineFrame = radarFrames.getOrNull(index) ?: return
+        currentRadarFrameIndex = index
+        radarOverlayManager.showFrame(radarHost, timelineFrame.frame)
+
+        val differenceMinutes =
+            abs(timelineFrame.frame.time - latestRadarObservationTime) / 60
+        val frameKind = when {
+            timelineFrame.isForecast -> "Prévision +" + differenceMinutes + " min"
+            differenceMinutes == 0L -> "Dernière observation"
+            else -> "Observation -" + differenceMinutes + " min"
+        }
+        val localTime = radarTimeFormatter.format(Date(timelineFrame.frame.time * 1000))
+        radarTimeTextView.text = frameKind + " • " + localTime
+    }
+
+    private fun startRadarAnimation() {
+        if (radarFrames.size < 2) return
+
+        if (!radarAnimationHasStarted || currentRadarFrameIndex >= radarFrames.lastIndex) {
+            currentRadarFrameIndex = 0
+            radarSeekBar.progress = currentRadarFrameIndex
+            showRadarFrame(currentRadarFrameIndex)
+        }
+
+        radarAnimationHasStarted = true
+        radarPlayButton.text = "Pause"
+        radarAnimationJob = lifecycleScope.launch {
+            while (isActive) {
+                val pause = if (currentRadarFrameIndex == radarFrames.lastIndex) {
+                    RADAR_LAST_FRAME_DURATION_MS
+                } else {
+                    RADAR_FRAME_DURATION_MS
+                }
+                delay(pause)
+
+                currentRadarFrameIndex =
+                    if (currentRadarFrameIndex >= radarFrames.lastIndex) 0
+                    else currentRadarFrameIndex + 1
+                radarSeekBar.progress = currentRadarFrameIndex
+                showRadarFrame(currentRadarFrameIndex)
+            }
+        }
+    }
+
+    private fun stopRadarAnimation() {
+        radarAnimationJob?.cancel()
+        radarAnimationJob = null
+        if (::radarPlayButton.isInitialized) {
+            radarPlayButton.text = "Lecture"
         }
     }
 
@@ -239,8 +376,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        stopRadarAnimation()
         super.onPause()
         mapView.onPause()
+    }
+
+    override fun onDestroy() {
+        radarLoadJob?.cancel()
+        radarOverlayManager.clearOverlays()
+        mapView.onDetach()
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(
@@ -259,5 +404,13 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val LOCATION_PERMISSION_REQ_CODE = 1001
+        private const val RADAR_HISTORY_SECONDS = 60 * 60L
+        private const val RADAR_FRAME_DURATION_MS = 800L
+        private const val RADAR_LAST_FRAME_DURATION_MS = 1_400L
     }
+
+    private data class RadarTimelineFrame(
+        val frame: RadarFrame,
+        val isForecast: Boolean
+    )
 }
