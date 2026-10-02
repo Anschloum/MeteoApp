@@ -1,51 +1,76 @@
 package com.exemple.meteo
 
-import android.graphics.Bitmap
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
+import android.graphics.Color
+import org.osmdroid.tileprovider.MapTileProviderBasic
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.GroundOverlay
+import org.osmdroid.views.overlay.TilesOverlay
 
 class RadarMapOverlayManager(private val mapView: MapView) {
 
-    // Emprise géographique approximative de la mosaïque radar France Métropole Météo-France
-    private val franceRadarBounds = BoundingBox(
-        51.1,  // Latitude Nord
-        9.6,   // Longitude Est
-        41.3,  // Latitude Sud
-        -5.2   // Longitude Ouest
-    )
-
-    private var currentOverlay: GroundOverlay? = null
+    private val overlaysByTimestamp = mutableMapOf<Long, TilesOverlay>()
+    private var currentOverlay: TilesOverlay? = null
 
     /**
-     * Applique ou met à jour l'image radar sur la carte.
+     * Affiche une trame RainViewer. Les images sont de vraies tuiles Web Mercator :
+     * elles restent donc alignées avec OpenStreetMap à tous les niveaux de zoom.
      */
-    fun updateRadarOverlay(radarBitmap: Bitmap) {
-        currentOverlay?.let { mapView.overlays.remove(it) }
-
-        val groundOverlay = GroundOverlay().apply {
-            setImage(radarBitmap)
-            setPosition(
-                GeoPoint(franceRadarBounds.latNorth, franceRadarBounds.lonWest),
-                GeoPoint(franceRadarBounds.latSouth, franceRadarBounds.lonEast)
-            )
-            setTransparency(0.15f)
+    fun showFrame(host: String, frame: RadarFrame) {
+        val overlay = overlaysByTimestamp.getOrPut(frame.time) {
+            createOverlay(host, frame)
         }
 
-        mapView.overlays.add(groundOverlay)
-        currentOverlay = groundOverlay
+        currentOverlay?.isEnabled = false
+        overlay.isEnabled = true
+
+        if (!mapView.overlays.contains(overlay)) {
+            // La couche radar doit rester sous les marqueurs et autres overlays.
+            mapView.overlays.add(0, overlay)
+        }
+
+        currentOverlay = overlay
         mapView.invalidate()
     }
 
-    /**
-     * Supprime l'overlay de la carte.
-     */
-    fun clearOverlay() {
-        currentOverlay?.let {
-            mapView.overlays.remove(it)
-            currentOverlay = null
-            mapView.invalidate()
+    fun clearOverlays() {
+        overlaysByTimestamp.values.forEach { overlay ->
+            mapView.overlays.remove(overlay)
+            overlay.onDetach(mapView)
+        }
+        overlaysByTimestamp.clear()
+        currentOverlay = null
+        mapView.invalidate()
+    }
+
+    private fun createOverlay(host: String, frame: RadarFrame): TilesOverlay {
+        val normalizedHost = host.trimEnd('/')
+        val normalizedPath = if (frame.path.startsWith('/')) frame.path else "/" + frame.path
+        val tileBaseUrl = normalizedHost + normalizedPath + "/256/"
+
+        val tileSource = object : OnlineTileSourceBase(
+            "RainViewer-" + frame.time,
+            0,
+            20,
+            256,
+            ".png",
+            arrayOf(tileBaseUrl),
+            "© RainViewer"
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                return getBaseUrl() +
+                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getX(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) +
+                    "/2/1_1.png"
+            }
+        }
+
+        val tileProvider = MapTileProviderBasic(mapView.context.applicationContext, tileSource)
+        return TilesOverlay(tileProvider, mapView.context).apply {
+            setLoadingBackgroundColor(Color.TRANSPARENT)
+            setLoadingLineColor(Color.TRANSPARENT)
+            isEnabled = false
         }
     }
 }
