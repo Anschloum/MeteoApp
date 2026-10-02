@@ -8,16 +8,16 @@ interface RainViewerService {
 }
 
 data class RainViewerResponse(
-    val host: String,
-    val radar: RadarData
+    val host: String = "",
+    val radar: RadarData = RadarData()
 )
 
 data class RadarData(
-    val past: List<RadarFrame>,
-    val nowcast: List<RadarFrame>
+    val past: List<RadarFrame> = emptyList(),
+    val nowcast: List<RadarFrame> = emptyList()
 )
 
 data class RadarFrame(
-    val time: Long,
-    val path: String
+    val time: Long = 0,
+    val path: String = ""
 )
